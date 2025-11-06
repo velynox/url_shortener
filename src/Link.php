@@ -16,25 +16,26 @@ class Link
      * Create a new short link for the given URL.
      * Returns the generated short code.
      *
+     * @param int $length Code length. Web UI uses 6, API uses 7.
      * @throws \InvalidArgumentException if the URL is not valid.
      */
-    public function create(string $url): string
+    public function create(string $url, int $length = 6): string
     {
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
             throw new \InvalidArgumentException('Invalid URL provided.');
         }
 
-        // Check if this URL was already shortened — reuse the existing code.
+        // Check if this URL was already shortened at the same length — reuse it.
         $existing = $this->db->queryOne(
-            'SELECT code FROM links WHERE url = :url LIMIT 1',
-            [':url' => $url]
+            'SELECT code FROM links WHERE url = :url AND LENGTH(code) = :len LIMIT 1',
+            [':url' => $url, ':len' => $length]
         );
 
         if ($existing !== null) {
             return $existing['code'];
         }
 
-        $code = $this->generateCode();
+        $code = $this->generateCode($length);
 
         $this->db->execute(
             'INSERT INTO links (code, url) VALUES (:code, :url)',
@@ -42,6 +43,19 @@ class Link
         );
 
         return $code;
+    }
+
+    /**
+     * Find a single link row by code. Returns null if not found.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function find(string $code): ?array
+    {
+        return $this->db->queryOne(
+            'SELECT id, code, url, clicks, created_at FROM links WHERE code = :code LIMIT 1',
+            [':code' => $code]
+        );
     }
 
     /**
@@ -80,16 +94,16 @@ class Link
     }
 
     /**
-     * Generate a unique 6-character alphanumeric short code.
+     * Generate a unique alphanumeric short code of the given length.
      */
-    private function generateCode(): string
+    private function generateCode(int $length): string
     {
         $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         $max   = strlen($chars) - 1;
 
         do {
             $code = '';
-            for ($i = 0; $i < 6; $i++) {
+            for ($i = 0; $i < $length; $i++) {
                 $code .= $chars[random_int(0, $max)];
             }
             $exists = $this->db->queryOne(
