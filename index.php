@@ -15,10 +15,9 @@ $db     = new Database(__DIR__ . '/db/links.sqlite');
 $links  = new Link($db);
 $router = new Router();
 
-// Determine the base URL for displaying short links.
-$scheme  = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-$host    = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$baseUrl = $scheme . '://' . $host;
+// Canonical base URL. Always use the production domain to avoid host-header injection.
+// Override with APP_URL env var for local development: APP_URL=http://localhost:8080
+$baseUrl = rtrim(getenv('APP_URL') ?: 'https://link.velynox.de', '/');
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -69,6 +68,87 @@ $router->get('/s/{code}', function (array $params) use ($links) {
 
     header('Location: ' . $url, true, 301);
     exit;
+});
+
+// ─── API Routes ──────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/shorten
+ * Body: { "url": "https://..." }
+ * Creates a short link with a 7-character code (one longer than the UI default).
+ */
+$router->post('/api/shorten', function () use ($links, $baseUrl) {
+    header('Content-Type: application/json');
+
+    $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+    $url  = trim($body['url'] ?? '');
+
+    if ($url === '') {
+        http_response_code(422);
+        echo json_encode(['error' => 'url is required.']);
+        return;
+    }
+
+    try {
+        $code = $links->create($url, 7); // API codes are 7 chars.
+        $link = $links->find($code);
+
+        http_response_code(201);
+        echo json_encode([
+            'code'       => $link['code'],
+            'short'      => $baseUrl . '/' . $link['code'],
+            'url'        => $link['url'],
+            'clicks'     => (int) $link['clicks'],
+            'created_at' => $link['created_at'],
+        ]);
+    } catch (\InvalidArgumentException $e) {
+        http_response_code(422);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+});
+
+/**
+ * GET /api/links
+ * Returns all links as a JSON array.
+ */
+$router->get('/api/links', function () use ($links, $baseUrl) {
+    header('Content-Type: application/json');
+
+    $all = array_map(function (array $link) use ($baseUrl): array {
+        return [
+            'code'       => $link['code'],
+            'short'      => $baseUrl . '/' . $link['code'],
+            'url'        => $link['url'],
+            'clicks'     => (int) $link['clicks'],
+            'created_at' => $link['created_at'],
+        ];
+    }, $links->all());
+
+    echo json_encode($all);
+});
+
+/**
+ * GET /api/links/{code}
+ * Returns a single link by its short code.
+ */
+$router->get('/api/links/{code}', function (array $params) use ($links, $baseUrl) {
+    header('Content-Type: application/json');
+
+    $link = $links->find($params['code']);
+
+    if ($link === null) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Link not found.']);
+        return;
+    }
+
+    echo json_encode([
+        'code'       => $link['code'],
+        'short'      => $baseUrl . '/' . $link['code'],
+        'url'        => $link['url'],
+        'clicks'     => (int) $link['clicks'],
+        'created_at' => $link['created_at'],
+    ]);
 });
 
 // ─── Dispatch ────────────────────────────────────────────────────────────────
@@ -159,7 +239,7 @@ function renderHome(array $all, string $baseUrl, ?array $flash): string
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>url shortener</title>
+        <title>link.velynox.de</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -188,7 +268,7 @@ function renderHome(array $all, string $baseUrl, ?array $flash): string
                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                     </svg>
-                    <h1 class="text-xl font-bold text-[#cba6f7]">url shortener</h1>
+                <h1 class="text-xl font-bold text-[#cba6f7]">link.velynox.de</h1>
                 </div>
                 <p class="text-[#a6adc8] text-sm">Paste a long URL. Get a short one. That's it.</p>
             </header>
@@ -226,7 +306,7 @@ function renderHome(array $all, string $baseUrl, ?array $flash): string
 
             <!-- Footer -->
             <footer class="mt-16 text-[#585b70] text-xs text-center">
-                velynox.de &mdash; local instance
+                link.velynox.de
             </footer>
 
         </div>
