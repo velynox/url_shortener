@@ -1,3 +1,4 @@
 db/*.sqlite
 db/*.db
+config.local.php
 .DS_Store
