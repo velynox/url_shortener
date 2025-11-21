@@ -21,4 +21,7 @@ return [
 
     // Short code length for links created via the API (one longer than UI).
     'api_code_length' => 7,
+
+    // GitHub profile/repo URL shown in the footer and API docs.
+    'github_url' => 'https://github.com/velynox',
 ];
