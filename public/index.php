@@ -135,6 +135,24 @@ $router->get('/api/links/{code}', function (array $params) use ($links, $baseUrl
     ]);
 });
 
+/**
+ * DELETE /api/links/{code}
+ * Delete a link by its short code. Returns 204 on success, 404 if not found.
+ */
+$router->delete('/api/links/{code}', function (array $params) use ($links) {
+    header('Content-Type: application/json');
+
+    $deleted = $links->delete($params['code']);
+
+    if (!$deleted) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Link not found.']);
+        return;
+    }
+
+    http_response_code(204);
+});
+
 // Redirect short link — must be last; skip reserved paths.
 $router->get('/{code}', function (array $params) use ($links) {
     // Guard against accidentally catching /api or other reserved segments.
@@ -258,8 +276,10 @@ function renderHome(array $all, string $baseUrl, string $githubUrl, ?array $flas
     }
 
     // Stats
-    $totalLinks  = count($all);
-    $totalClicks = array_sum(array_column($all, 'clicks'));
+    $totalLinks      = count($all);
+    $totalClicks     = (int) array_sum(array_column($all, 'clicks'));
+    $linkLabel       = $totalLinks  !== 1 ? 'links'  : 'link';
+    $clickLabel      = $totalClicks !== 1 ? 'clicks' : 'click';
 
     $rows = '';
     foreach ($all as $link) {
@@ -354,8 +374,8 @@ function renderHome(array $all, string $baseUrl, string $githubUrl, ?array $flas
         </form>
 
         <div class="flex gap-6 mb-6 text-xs text-[#a6adc8]">
-            <span>{$totalLinks} link{$totalLinks !== 1 ? 's' : ''}</span>
-            <span>{$totalClicks} click{$totalClicks !== 1 ? 's' : ''} total</span>
+            <span>{$totalLinks} {$linkLabel}</span>
+            <span>{$totalClicks} {$clickLabel} total</span>
         </div>
 
         <section>
@@ -395,6 +415,7 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
         $methodColor = match ($method) {
             'POST'   => 'text-[#a6e3a1]',
             'GET'    => 'text-[#89b4fa]',
+            'DELETE' => 'text-[#f38ba8]',
             default  => 'text-[#cdd6f4]',
         };
 
@@ -474,6 +495,15 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
         htmlspecialchars("curl {$baseUrl}/api/links/{$exampleCode}")
     );
 
+    $e4 = $endpoint(
+        'DELETE',
+        '/api/links/{code}',
+        'Delete a link by its short code. Returns 204 No Content on success, 404 if not found.',
+        '',
+        '204 No Content',
+        htmlspecialchars("curl -X DELETE {$baseUrl}/api/links/{$exampleCode}")
+    );
+
     return <<<HTML
     {$head}
 
@@ -499,6 +529,7 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
             {$e1}
             {$e2}
             {$e3}
+            {$e4}
         </section>
 
         <section class="border border-[#313244] rounded px-4 py-4 text-sm text-[#a6adc8] mb-6">
