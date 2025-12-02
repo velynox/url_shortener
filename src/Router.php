@@ -30,6 +30,14 @@ class Router
     }
 
     /**
+     * Register a DELETE route.
+     */
+    public function delete(string $pattern, callable $handler): void
+    {
+        $this->routes['DELETE'][$pattern] = $handler;
+    }
+
+    /**
      * Dispatch the current request.
      * Supports one named capture group: {param}.
      */

@@ -94,6 +94,28 @@ class Link
     }
 
     /**
+     * Delete a link by code. Returns true if a row was deleted, false if not found.
+     */
+    public function delete(string $code): bool
+    {
+        $existing = $this->db->queryOne(
+            'SELECT 1 FROM links WHERE code = :code',
+            [':code' => $code]
+        );
+
+        if ($existing === null) {
+            return false;
+        }
+
+        $this->db->execute(
+            'DELETE FROM links WHERE code = :code',
+            [':code' => $code]
+        );
+
+        return true;
+    }
+
+    /**
      * Generate a unique alphanumeric short code of the given length.
      */
     private function generateCode(int $length): string
