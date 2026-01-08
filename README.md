@@ -2,6 +2,14 @@
 
 A self-hosted URL shortener built with raw PHP and SQLite. No framework, no Composer, no build step.
 
+## How it works
+
+- Paste a URL into the form → get a short link
+- Visit the short link → 301 redirect to the original URL
+- Append `+` to any short link → stats page (clicks, original URL, creation date)
+
+Example: `https://link.velynox.de/aBcDeF` redirects, `https://link.velynox.de/aBcDeF+` shows stats.
+
 ## Stack
 
 - PHP 8.1+
@@ -79,18 +87,11 @@ curl -X POST http://localhost:8080/api/shorten \
 {
   "code": "aBcDeFg",
   "short": "http://localhost:8080/aBcDeFg",
+  "stats": "http://localhost:8080/aBcDeFg+",
   "url": "https://example.com/very/long/path",
   "clicks": 0,
-  "created_at": "2026-03-26 12:00:00"
+  "created_at": "2025-11-03 14:22:00"
 }
-```
-
-### GET /api/links
-
-List all links.
-
-```bash
-curl http://localhost:8080/api/links
 ```
 
 ### GET /api/links/{code}
@@ -99,14 +100,6 @@ Get a single link by code. Returns `404` if not found.
 
 ```bash
 curl http://localhost:8080/api/links/aBcDeFg
-```
-
-### DELETE /api/links/{code}
-
-Delete a link. Returns `204 No Content` on success, `404` if not found.
-
-```bash
-curl -X DELETE http://localhost:8080/api/links/aBcDeFg
 ```
 
 ### Error format
