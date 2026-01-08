@@ -7,76 +7,64 @@ namespace App;
 /**
  * Minimal request router.
  * Matches the current request method + path against registered routes.
+ * Supports named capture groups via {param} syntax in patterns.
  */
 class Router
 {
     /** @var array<string, array<string, callable>> */
     private array $routes = [];
 
-    /**
-     * Register a GET route.
-     */
     public function get(string $pattern, callable $handler): void
     {
         $this->routes['GET'][$pattern] = $handler;
     }
 
-    /**
-     * Register a POST route.
-     */
     public function post(string $pattern, callable $handler): void
     {
         $this->routes['POST'][$pattern] = $handler;
     }
 
     /**
-     * Register a DELETE route.
-     */
-    public function delete(string $pattern, callable $handler): void
-    {
-        $this->routes['DELETE'][$pattern] = $handler;
-    }
-
-    /**
-     * Dispatch the current request.
-     * Supports one named capture group: {param}.
+     * Dispatch the current request against registered routes.
      */
     public function dispatch(string $method, string $path): void
     {
-        $routes = $this->routes[$method] ?? [];
-
-        foreach ($routes as $pattern => $handler) {
-            $regex = $this->patternToRegex($pattern);
-
-            if (preg_match($regex, $path, $matches)) {
-                // Pass only named captures (skip the full match at index 0).
-                $params = array_filter(
-                    $matches,
-                    fn($key) => !is_int($key),
-                    ARRAY_FILTER_USE_KEY
-                );
-                $handler($params);
+        foreach ($this->routes[$method] ?? [] as $pattern => $handler) {
+            if (preg_match($this->patternToRegex($pattern), $path, $matches)) {
+                $handler(array_filter($matches, fn($k) => !is_int($k), ARRAY_FILTER_USE_KEY));
                 return;
             }
         }
 
-        // No route matched.
         http_response_code(404);
         echo $this->render404();
     }
 
     /**
-     * Convert a route pattern like /s/{code} into a named-capture regex.
+     * Convert a route pattern into a named-capture regex.
+     *
+     * Segments outside {param} blocks are regex-escaped so literal characters
+     * like '+' are treated as plain text, not quantifiers.
+     *
+     * Example: '/{code}+' → '#^/(?P<code>[^/]+)\+$#'
      */
     private function patternToRegex(string $pattern): string
     {
-        $regex = preg_replace('/\{(\w+)\}/', '(?P<$1>[^/]+)', $pattern);
+        // Split on {param} tokens, escape everything else, reassemble.
+        $parts  = preg_split('/(\{(\w+)\})/', $pattern, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $regex  = '';
+
+        for ($i = 0; $i < count($parts); $i++) {
+            if (preg_match('/^\{(\w+)\}$/', $parts[$i], $m)) {
+                $regex .= '(?P<' . $m[1] . '>[^/]+)';
+            } else {
+                $regex .= preg_quote($parts[$i], '#');
+            }
+        }
+
         return '#^' . $regex . '$#';
     }
 
-    /**
-     * Minimal 404 page — same design system, no layout duplication.
-     */
     private function render404(): string
     {
         return <<<HTML
