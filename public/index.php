@@ -34,11 +34,10 @@ $githubUrl = $config['github_url'] ?? 'https://github.com/velynox';
 
 // ─── Web Routes ──────────────────────────────────────────────────────────────
 
-$router->get('/', function () use ($links, $baseUrl, $githubUrl) {
-    $all   = $links->all();
+$router->get('/', function () use ($baseUrl, $githubUrl) {
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
-    echo renderHome($all, $baseUrl, $githubUrl, $flash);
+    echo renderHome($baseUrl, $githubUrl, $flash);
 });
 
 $router->post('/', function () use ($links, $baseUrl, $config) {
@@ -55,6 +54,7 @@ $router->post('/', function () use ($links, $baseUrl, $config) {
         $_SESSION['flash'] = [
             'type'  => 'success',
             'short' => $baseUrl . '/' . $code,
+            'code'  => $code,
         ];
     } catch (\InvalidArgumentException $e) {
         $_SESSION['flash'] = ['type' => 'error', 'message' => $e->getMessage()];
@@ -62,6 +62,12 @@ $router->post('/', function () use ($links, $baseUrl, $config) {
 
     header('Location: /');
     exit;
+});
+
+// Stats page: /{code}+ shows info without redirecting.
+$router->get('/{code}+', function (array $params) use ($links, $baseUrl, $githubUrl) {
+    $link = $links->find($params['code']);
+    echo renderStats($link, $params['code'], $baseUrl, $githubUrl);
 });
 
 // API docs page.
@@ -91,6 +97,7 @@ $router->post('/api/shorten', function () use ($links, $baseUrl, $config) {
         echo json_encode([
             'code'       => $link['code'],
             'short'      => $baseUrl . '/' . $link['code'],
+            'stats'      => $baseUrl . '/' . $link['code'] . '+',
             'url'        => $link['url'],
             'clicks'     => (int) $link['clicks'],
             'created_at' => $link['created_at'],
@@ -99,20 +106,6 @@ $router->post('/api/shorten', function () use ($links, $baseUrl, $config) {
         http_response_code(422);
         echo json_encode(['error' => $e->getMessage()]);
     }
-});
-
-$router->get('/api/links', function () use ($links, $baseUrl) {
-    header('Content-Type: application/json');
-
-    $all = array_map(fn(array $link): array => [
-        'code'       => $link['code'],
-        'short'      => $baseUrl . '/' . $link['code'],
-        'url'        => $link['url'],
-        'clicks'     => (int) $link['clicks'],
-        'created_at' => $link['created_at'],
-    ], $links->all());
-
-    echo json_encode($all);
 });
 
 $router->get('/api/links/{code}', function (array $params) use ($links, $baseUrl) {
@@ -129,33 +122,15 @@ $router->get('/api/links/{code}', function (array $params) use ($links, $baseUrl
     echo json_encode([
         'code'       => $link['code'],
         'short'      => $baseUrl . '/' . $link['code'],
+        'stats'      => $baseUrl . '/' . $link['code'] . '+',
         'url'        => $link['url'],
         'clicks'     => (int) $link['clicks'],
         'created_at' => $link['created_at'],
     ]);
 });
 
-/**
- * DELETE /api/links/{code}
- * Delete a link by its short code. Returns 204 on success, 404 if not found.
- */
-$router->delete('/api/links/{code}', function (array $params) use ($links) {
-    header('Content-Type: application/json');
-
-    $deleted = $links->delete($params['code']);
-
-    if (!$deleted) {
-        http_response_code(404);
-        echo json_encode(['error' => 'Link not found.']);
-        return;
-    }
-
-    http_response_code(204);
-});
-
-// Redirect short link — must be last; skip reserved paths.
+// Redirect short link — registered last; guards reserved single-segment paths.
 $router->get('/{code}', function (array $params) use ($links) {
-    // Guard against accidentally catching /api or other reserved segments.
     if (in_array($params['code'], ['api', 'favicon.ico'], true)) {
         http_response_code(404);
         return;
@@ -182,11 +157,8 @@ $path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
 $router->dispatch($method, $path);
 
-// ─── Shared layout helpers ───────────────────────────────────────────────────
+// ─── Shared layout helpers ────────────────────────────────────────────────────
 
-/**
- * Shared <head> block and opening body wrapper.
- */
 function layoutHead(string $title): string
 {
     return <<<HTML
@@ -212,7 +184,6 @@ function layoutHead(string $title): string
     HTML;
 }
 
-/** Shared footer + closing tags. */
 function layoutFoot(string $host, string $githubUrl): string
 {
     $ghUrl = htmlspecialchars($githubUrl);
@@ -235,33 +206,37 @@ function layoutFoot(string $host, string $githubUrl): string
     HTML;
 }
 
-// ─── Home view ───────────────────────────────────────────────────────────────
+// ─── Home view ────────────────────────────────────────────────────────────────
 
-/**
- * @param array<int, array<string, mixed>> $all
- * @param array<string, mixed>|null        $flash
- */
-function renderHome(array $all, string $baseUrl, string $githubUrl, ?array $flash): string
+/** @param array<string, mixed>|null $flash */
+function renderHome(string $baseUrl, string $githubUrl, ?array $flash): string
 {
     $host      = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
     $flashHtml = '';
 
     if ($flash !== null) {
         if ($flash['type'] === 'success') {
-            $short     = htmlspecialchars($flash['short'] ?? '');
+            $short    = htmlspecialchars($flash['short'] ?? '');
+            $statsUrl = htmlspecialchars(($flash['short'] ?? '') . '+');
             $flashHtml = <<<HTML
-            <div class="border border-[#a6e3a1] bg-[#181825] text-[#a6e3a1] px-4 py-3 rounded text-sm mb-6 flex items-center justify-between gap-3">
-                <div class="flex items-center gap-3 min-w-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="20 6 9 17 4 12"/></svg>
-                    <span class="truncate">Link ready: <a href="{$short}" class="text-[#89b4fa] underline underline-offset-2" target="_blank">{$short}</a></span>
+            <div class="border border-[#a6e3a1] bg-[#181825] text-[#a6e3a1] px-4 py-3 rounded text-sm mb-6">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="20 6 9 17 4 12"/></svg>
+                        <a href="{$short}" class="text-[#89b4fa] underline underline-offset-2 truncate" target="_blank">{$short}</a>
+                    </div>
+                    <button
+                        class="copy-btn shrink-0 flex items-center gap-1.5 text-[#a6adc8] hover:text-[#cdd6f4] transition-colors text-xs border border-[#313244] rounded px-2 py-1"
+                        onclick="navigator.clipboard.writeText('{$short}').then(() => { this.querySelector('span').textContent = 'copied'; setTimeout(() => this.querySelector('span').textContent = 'copy', 1500); })"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <span>copy</span>
+                    </button>
                 </div>
-                <button
-                    class="copy-btn shrink-0 flex items-center gap-1.5 text-[#a6adc8] hover:text-[#cdd6f4] transition-colors text-xs border border-[#313244] rounded px-2 py-1"
-                    onclick="navigator.clipboard.writeText('{$short}').then(() => { this.querySelector('span').textContent = 'copied'; setTimeout(() => this.querySelector('span').textContent = 'copy', 1500); })"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    <span>copy</span>
-                </button>
+                <a href="{$statsUrl}" class="text-xs text-[#585b70] hover:text-[#a6adc8] transition-colors flex items-center gap-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    view stats
+                </a>
             </div>
             HTML;
         } else {
@@ -274,60 +249,6 @@ function renderHome(array $all, string $baseUrl, string $githubUrl, ?array $flas
             HTML;
         }
     }
-
-    // Stats
-    $totalLinks      = count($all);
-    $totalClicks     = (int) array_sum(array_column($all, 'clicks'));
-    $linkLabel       = $totalLinks  !== 1 ? 'links'  : 'link';
-    $clickLabel      = $totalClicks !== 1 ? 'clicks' : 'click';
-
-    $rows = '';
-    foreach ($all as $link) {
-        $code       = htmlspecialchars($link['code']);
-        $url        = htmlspecialchars($link['url']);
-        $short      = htmlspecialchars($baseUrl . '/' . $link['code']);
-        $clicks     = (int) $link['clicks'];
-        $created    = htmlspecialchars($link['created_at']);
-        $displayUrl = strlen($url) > 52 ? substr($url, 0, 49) . '...' : $url;
-
-        $rows .= <<<HTML
-        <tr class="border-t border-[#313244] hover:bg-[#181825] transition-colors group">
-            <td class="py-3 px-4">
-                <div class="flex items-center gap-2">
-                    <a href="{$short}" class="text-[#89b4fa] hover:underline underline-offset-2" target="_blank">/{$code}</a>
-                    <button
-                        class="copy-btn opacity-0 group-hover:opacity-100 transition-opacity text-[#585b70] hover:text-[#cdd6f4]"
-                        title="Copy short link"
-                        onclick="navigator.clipboard.writeText('{$short}')"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                </div>
-            </td>
-            <td class="py-3 px-4 text-[#a6adc8] text-xs" title="{$url}">{$displayUrl}</td>
-            <td class="py-3 px-4 text-[#cba6f7] text-center tabular-nums">{$clicks}</td>
-            <td class="py-3 px-4 text-[#a6adc8] text-xs tabular-nums">{$created}</td>
-        </tr>
-        HTML;
-    }
-
-    $tableOrEmpty = $rows !== ''
-        ? <<<HTML
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="text-[#a6adc8] uppercase tracking-widest text-xs">
-                        <th class="py-2 px-4 text-left">Short Link</th>
-                        <th class="py-2 px-4 text-left">Original URL</th>
-                        <th class="py-2 px-4 text-center">Clicks</th>
-                        <th class="py-2 px-4 text-left">Created</th>
-                    </tr>
-                </thead>
-                <tbody>{$rows}</tbody>
-            </table>
-        </div>
-        HTML
-        : '<p class="text-[#a6adc8] text-sm px-4 py-3">No links yet. Create one above.</p>';
 
     $head = layoutHead($host);
     $foot = layoutFoot($host, $githubUrl);
@@ -373,37 +294,111 @@ function renderHome(array $all, string $baseUrl, string $githubUrl, ?array $flas
             </div>
         </form>
 
-        <div class="flex gap-6 mb-6 text-xs text-[#a6adc8]">
-            <span>{$totalLinks} {$linkLabel}</span>
-            <span>{$totalClicks} {$clickLabel} total</span>
-        </div>
-
-        <section>
-            <div class="border border-[#313244] rounded">
-                {$tableOrEmpty}
-            </div>
-        </section>
+        <p class="text-xs text-[#585b70]">
+            Append <code class="text-[#a6adc8]">+</code> to any short link to view its stats.
+        </p>
 
     {$foot}
     HTML;
 }
 
-// ─── API Docs view ───────────────────────────────────────────────────────────
+// ─── Stats view ───────────────────────────────────────────────────────────────
 
-/**
- * @param array<string, mixed> $config
- */
+/** @param array<string, mixed>|null $link */
+function renderStats(?array $link, string $code, string $baseUrl, string $githubUrl): string
+{
+    $host = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
+    $head = layoutHead($host . ' — /' . htmlspecialchars($code));
+    $foot = layoutFoot($host, $githubUrl);
+
+    if ($link === null) {
+        return <<<HTML
+        {$head}
+            <div class="flex flex-col items-start gap-4">
+                <p class="text-[#f38ba8] text-sm">No link found for code <code class="text-[#cdd6f4]">/{$code}</code>.</p>
+                <a href="/" class="text-xs text-[#a6adc8] hover:text-[#cdd6f4] transition-colors flex items-center gap-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    back
+                </a>
+            </div>
+        {$foot}
+        HTML;
+    }
+
+    $safeCode    = htmlspecialchars($link['code']);
+    $shortUrl    = htmlspecialchars($baseUrl . '/' . $link['code']);
+    $originalUrl = htmlspecialchars($link['url']);
+    $clicks      = (int) $link['clicks'];
+    $created     = htmlspecialchars($link['created_at']);
+    $clickLabel  = $clicks !== 1 ? 'clicks' : 'click';
+
+    return <<<HTML
+    {$head}
+
+        <header class="mb-12">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#cba6f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    <h1 class="text-xl font-bold text-[#cba6f7]">/{$safeCode}</h1>
+                </div>
+                <a href="/" class="text-xs text-[#a6adc8] hover:text-[#cdd6f4] transition-colors flex items-center gap-1.5 border border-[#313244] rounded px-3 py-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    back
+                </a>
+            </div>
+        </header>
+
+        <div class="space-y-4">
+
+            <div class="border border-[#313244] rounded px-4 py-4">
+                <p class="text-xs uppercase tracking-widest text-[#a6adc8] mb-2">Short link</p>
+                <div class="flex items-center justify-between gap-3">
+                    <a href="{$shortUrl}" class="text-[#89b4fa] underline underline-offset-2 text-sm" target="_blank">{$shortUrl}</a>
+                    <button
+                        class="copy-btn shrink-0 flex items-center gap-1.5 text-[#585b70] hover:text-[#cdd6f4] transition-colors text-xs"
+                        onclick="navigator.clipboard.writeText('{$shortUrl}')"
+                        title="Copy"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="border border-[#313244] rounded px-4 py-4">
+                <p class="text-xs uppercase tracking-widest text-[#a6adc8] mb-2">Original URL</p>
+                <a href="{$originalUrl}" class="text-[#cdd6f4] text-sm break-all hover:text-[#89b4fa] transition-colors" target="_blank" rel="noopener">{$originalUrl}</a>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="border border-[#313244] rounded px-4 py-4">
+                    <p class="text-xs uppercase tracking-widest text-[#a6adc8] mb-2">Clicks</p>
+                    <p class="text-2xl font-bold text-[#cba6f7] tabular-nums">{$clicks} <span class="text-sm font-normal text-[#a6adc8]">{$clickLabel}</span></p>
+                </div>
+                <div class="border border-[#313244] rounded px-4 py-4">
+                    <p class="text-xs uppercase tracking-widest text-[#a6adc8] mb-2">Created</p>
+                    <p class="text-sm text-[#cdd6f4] tabular-nums">{$created}</p>
+                </div>
+            </div>
+
+        </div>
+
+    {$foot}
+    HTML;
+}
+
+// ─── API Docs view ────────────────────────────────────────────────────────────
+
+/** @param array<string, mixed> $config */
 function renderApiDocs(string $baseUrl, string $githubUrl, array $config): string
 {
-    $host           = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
-    $base           = htmlspecialchars($baseUrl);
-    $codeLen        = (int) $config['api_code_length'];
-    $exampleCode    = str_repeat('x', $codeLen); // placeholder for docs
+    $host        = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
+    $base        = htmlspecialchars($baseUrl);
+    $codeLen     = (int) $config['api_code_length'];
+    $exampleCode = str_repeat('x', $codeLen);
 
     $head = layoutHead($host . ' — API');
     $foot = layoutFoot($host, $githubUrl);
 
-    // Helper to render an endpoint block.
     $endpoint = static function (
         string $method,
         string $path,
@@ -413,10 +408,9 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
         string $curl
     ) use ($base): string {
         $methodColor = match ($method) {
-            'POST'   => 'text-[#a6e3a1]',
-            'GET'    => 'text-[#89b4fa]',
-            'DELETE' => 'text-[#f38ba8]',
-            default  => 'text-[#cdd6f4]',
+            'POST'  => 'text-[#a6e3a1]',
+            'GET'   => 'text-[#89b4fa]',
+            default => 'text-[#cdd6f4]',
         };
 
         $requestBlock = $request !== ''
@@ -458,29 +452,15 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
         htmlspecialchars(json_encode([
             'code'       => $exampleCode,
             'short'      => $baseUrl . '/' . $exampleCode,
+            'stats'      => $baseUrl . '/' . $exampleCode . '+',
             'url'        => 'https://example.com/very/long/path',
             'clicks'     => 0,
-            'created_at' => '2026-03-26 12:00:00',
+            'created_at' => '2025-11-03 14:22:00',
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)),
         htmlspecialchars("curl -X POST {$baseUrl}/api/shorten \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"url\": \"https://example.com/very/long/path\"}'")
     );
 
     $e2 = $endpoint(
-        'GET',
-        '/api/links',
-        'Return all shortened links ordered by creation date descending.',
-        '',
-        htmlspecialchars(json_encode([[
-            'code'       => $exampleCode,
-            'short'      => $baseUrl . '/' . $exampleCode,
-            'url'        => 'https://example.com/very/long/path',
-            'clicks'     => 4,
-            'created_at' => '2026-03-26 12:00:00',
-        ]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)),
-        htmlspecialchars("curl {$baseUrl}/api/links")
-    );
-
-    $e3 = $endpoint(
         'GET',
         '/api/links/{code}',
         'Return a single link by its short code. Returns 404 if not found.',
@@ -488,20 +468,12 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
         htmlspecialchars(json_encode([
             'code'       => $exampleCode,
             'short'      => $baseUrl . '/' . $exampleCode,
+            'stats'      => $baseUrl . '/' . $exampleCode . '+',
             'url'        => 'https://example.com/very/long/path',
             'clicks'     => 4,
-            'created_at' => '2026-03-26 12:00:00',
+            'created_at' => '2025-11-03 14:22:00',
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)),
         htmlspecialchars("curl {$baseUrl}/api/links/{$exampleCode}")
-    );
-
-    $e4 = $endpoint(
-        'DELETE',
-        '/api/links/{code}',
-        'Delete a link by its short code. Returns 204 No Content on success, 404 if not found.',
-        '',
-        '204 No Content',
-        htmlspecialchars("curl -X DELETE {$baseUrl}/api/links/{$exampleCode}")
     );
 
     return <<<HTML
@@ -528,8 +500,6 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
             <h2 class="text-xs uppercase tracking-widest text-[#a6adc8] mb-5">Endpoints</h2>
             {$e1}
             {$e2}
-            {$e3}
-            {$e4}
         </section>
 
         <section class="border border-[#313244] rounded px-4 py-4 text-sm text-[#a6adc8] mb-6">
