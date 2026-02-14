@@ -43,24 +43,26 @@ class Router
     /**
      * Convert a route pattern into a named-capture regex.
      *
-     * Segments outside {param} blocks are regex-escaped so literal characters
-     * like '+' are treated as plain text, not quantifiers.
+     * Escapes all literal characters outside {param} blocks so that
+     * characters like '+' are treated as plain text, not regex quantifiers.
      *
      * Example: '/{code}+' → '#^/(?P<code>[^/]+)\+$#'
      */
     private function patternToRegex(string $pattern): string
     {
-        // Split on {param} tokens, escape everything else, reassemble.
-        $parts  = preg_split('/(\{(\w+)\})/', $pattern, -1, PREG_SPLIT_DELIM_CAPTURE);
-        $regex  = '';
-
-        for ($i = 0; $i < count($parts); $i++) {
-            if (preg_match('/^\{(\w+)\}$/', $parts[$i], $m)) {
-                $regex .= '(?P<' . $m[1] . '>[^/]+)';
-            } else {
-                $regex .= preg_quote($parts[$i], '#');
-            }
-        }
+        // Split into alternating [literal, param, literal, param, ...] chunks.
+        $regex = preg_replace_callback(
+            '/\{(\w+)\}|([^{]+)/',
+            static function (array $m): string {
+                // Named param token.
+                if ($m[1] !== '') {
+                    return '(?P<' . $m[1] . '>[^/]+)';
+                }
+                // Literal segment — escape for use inside a regex.
+                return preg_quote($m[2], '#');
+            },
+            $pattern
+        );
 
         return '#^' . $regex . '$#';
     }
