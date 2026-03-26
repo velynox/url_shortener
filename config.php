@@ -24,4 +24,7 @@ return [
 
     // GitHub profile/repo URL shown in the footer and API docs.
     'github_url' => 'https://github.com/velynox',
+
+    // Timezone for display purposes (created_at timestamps, footer clock).
+    'timezone' => 'Europe/Berlin',
 ];

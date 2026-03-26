@@ -31,13 +31,16 @@ $baseUrl = rtrim($config['base_url'] ?? (
 ), '/');
 
 $githubUrl = $config['github_url'] ?? 'https://github.com/velynox';
+$timezone  = $config['timezone']   ?? 'Europe/Berlin';
+
+date_default_timezone_set($timezone);
 
 // ─── Web Routes ──────────────────────────────────────────────────────────────
 
-$router->get('/', function () use ($baseUrl, $githubUrl) {
+$router->get('/', function () use ($baseUrl, $githubUrl, $timezone) {
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
-    echo renderHome($baseUrl, $githubUrl, $flash);
+    echo renderHome($baseUrl, $githubUrl, $timezone, $flash);
 });
 
 $router->post('/', function () use ($links, $baseUrl, $config) {
@@ -65,14 +68,14 @@ $router->post('/', function () use ($links, $baseUrl, $config) {
 });
 
 // Stats page: /{code}+ shows info without redirecting.
-$router->get('/{code}+', function (array $params) use ($links, $baseUrl, $githubUrl) {
+$router->get('/{code}+', function (array $params) use ($links, $baseUrl, $githubUrl, $timezone) {
     $link = $links->find($params['code']);
-    echo renderStats($link, $params['code'], $baseUrl, $githubUrl);
+    echo renderStats($link, $params['code'], $baseUrl, $githubUrl, $timezone);
 });
 
 // API docs page.
-$router->get('/api', function () use ($baseUrl, $githubUrl, $config) {
-    echo renderApiDocs($baseUrl, $githubUrl, $config);
+$router->get('/api', function () use ($baseUrl, $githubUrl, $timezone, $config) {
+    echo renderApiDocs($baseUrl, $githubUrl, $timezone, $config);
 });
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
@@ -184,11 +187,16 @@ function layoutHead(string $title): string
     HTML;
 }
 
-function layoutFoot(string $host, string $githubUrl): string
+function layoutFoot(string $host, string $githubUrl, string $timezone): string
 {
     $ghUrl = htmlspecialchars($githubUrl);
+    $tz    = new \DateTimeZone($timezone);
+    $now   = new \DateTimeImmutable('now', $tz);
+    $time  = $now->format('H:i');
+    $tzAbbr = $now->format('T'); // e.g. CET or CEST
+
     return <<<HTML
-        <footer class="mt-16 text-[#585b70] text-xs flex items-center justify-center gap-4">
+        <footer class="mt-16 text-[#585b70] text-xs flex items-center justify-center gap-4 flex-wrap">
             <span>{$host}</span>
             <span>&mdash;</span>
             <a href="{$ghUrl}" target="_blank" rel="noopener" class="flex items-center gap-1.5 hover:text-[#cdd6f4] transition-colors">
@@ -199,6 +207,11 @@ function layoutFoot(string $host, string $githubUrl): string
             </a>
             <span>&mdash;</span>
             <a href="/api" class="hover:text-[#cdd6f4] transition-colors">api docs</a>
+            <span>&mdash;</span>
+            <span class="flex items-center gap-1.5" title="{$timezone}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                {$time} {$tzAbbr}
+            </span>
         </footer>
     </div>
     </body>
@@ -209,7 +222,7 @@ function layoutFoot(string $host, string $githubUrl): string
 // ─── Home view ────────────────────────────────────────────────────────────────
 
 /** @param array<string, mixed>|null $flash */
-function renderHome(string $baseUrl, string $githubUrl, ?array $flash): string
+function renderHome(string $baseUrl, string $githubUrl, string $timezone, ?array $flash): string
 {
     $host      = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
     $flashHtml = '';
@@ -251,7 +264,7 @@ function renderHome(string $baseUrl, string $githubUrl, ?array $flash): string
     }
 
     $head = layoutHead($host);
-    $foot = layoutFoot($host, $githubUrl);
+    $foot = layoutFoot($host, $githubUrl, $timezone);
 
     return <<<HTML
     {$head}
@@ -305,11 +318,11 @@ function renderHome(string $baseUrl, string $githubUrl, ?array $flash): string
 // ─── Stats view ───────────────────────────────────────────────────────────────
 
 /** @param array<string, mixed>|null $link */
-function renderStats(?array $link, string $code, string $baseUrl, string $githubUrl): string
+function renderStats(?array $link, string $code, string $baseUrl, string $githubUrl, string $timezone): string
 {
     $host = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
     $head = layoutHead($host . ' — /' . htmlspecialchars($code));
-    $foot = layoutFoot($host, $githubUrl);
+    $foot = layoutFoot($host, $githubUrl, $timezone);
 
     if ($link === null) {
         return <<<HTML
@@ -389,7 +402,7 @@ function renderStats(?array $link, string $code, string $baseUrl, string $github
 // ─── API Docs view ────────────────────────────────────────────────────────────
 
 /** @param array<string, mixed> $config */
-function renderApiDocs(string $baseUrl, string $githubUrl, array $config): string
+function renderApiDocs(string $baseUrl, string $githubUrl, string $timezone, array $config): string
 {
     $host        = parse_url($baseUrl, PHP_URL_HOST) ?? $baseUrl;
     $base        = htmlspecialchars($baseUrl);
@@ -397,7 +410,7 @@ function renderApiDocs(string $baseUrl, string $githubUrl, array $config): strin
     $exampleCode = str_repeat('x', $codeLen);
 
     $head = layoutHead($host . ' — API');
-    $foot = layoutFoot($host, $githubUrl);
+    $foot = layoutFoot($host, $githubUrl, $timezone);
 
     $endpoint = static function (
         string $method,
