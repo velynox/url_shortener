@@ -37,9 +37,16 @@ class Link
 
         $code = $this->generateCode($length);
 
+        // Use PHP's date() so the timestamp respects the application timezone
+        // (set via date_default_timezone_set in the bootstrap). SQLite's
+        // datetime('now') always returns UTC regardless of system timezone.
         $this->db->execute(
-            'INSERT INTO links (code, url) VALUES (:code, :url)',
-            [':code' => $code, ':url' => $url]
+            'INSERT INTO links (code, url, created_at) VALUES (:code, :url, :created_at)',
+            [
+                ':code'       => $code,
+                ':url'        => $url,
+                ':created_at' => date('Y-m-d H:i:s'),
+            ]
         );
 
         return $code;
